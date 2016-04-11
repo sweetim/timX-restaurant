@@ -2,8 +2,15 @@
 
 const express = require('express');
 const mongoose = require('mongoose');
-const Busboy = require('busboy');
+const multer  = require('multer')({
+    inMemory: true,
+    fileSize: 5 * 1024 * 1024,
+});
+
+const Promise = require('bluebird');
 const request = require('request');
+Promise.promisifyAll(require('request'));
+
 const uuid = require('node-uuid');
 
 const router = express.Router();
@@ -31,15 +38,41 @@ router.get('/:id', (req, res, next) => {
 });
 
 router.put('/:id', (req, res, next) => {
+    const id = req.params.id;
+
+    const newModel = {};
+
+    for (let prop in req.body) {
+        newModel[prop] = req.body[prop];
+    }
+
+    Restaurant.findByIdAndUpdate(
+        id,
+        newModel,
+        { new: true }
+    ).then((model) => {
+        res.json(model);
+    }).catch((err) => {
+        return next(err);
+    });
+});
+
+router.delete('/:id', (req, res, next) => {
+    const id = req.params.id;
+
+    Restaurant.findByIdAndRemove(id).then(() => {
+        res.json({
+            id: id
+        });
+    }).catch((err) => {
+        return next(err);
+    })
 });
 
 router.post('/', (req, res, next) => {
     const name = req.body.name;
     const description = req.body.description;
-    const location = [
-        req.body.location.lng,
-        req.body.location.lat
-    ];
+    const location = req.body.location;
 
     const restaurant = new Restaurant({
         name: name,
@@ -59,40 +92,80 @@ router.post('/', (req, res, next) => {
     });
 });
 
-router.post('/image/:id', (req, res, next) => {
+router.post('/image/:id', multer.single('image'), (req, res, next) => {
     const restaurantId = req.params.id;
-
-    const busboy = new Busboy({ headers: req.headers });
-
     const imageId = uuid.v1();
     const imageName = `${restaurantId}/${imageId}`
 
-    busboy.on('file', (fieldName, file, fileName, encoding, mimeType) => {
-        console.log(fieldName)
-        const formData = {
-            image: file,
-            name: imageName
-        }
+    const formData = {
+        image: {
+            value: req.file.buffer,
+            options: {
+                filename: req.file.originalname
+            }
+        },
+        contentType: req.file.mimetype,
+        name: imageName
+    };
 
-        request.post({
-            encoding: null,
-            url: 'http://localhost:8080/api/image',
-            formData: formData
-        }, (err, httpRes, body) => {
-            if (err) return next(err);
+    request.postAsync({
+        url: 'http://localhost:8080/api/image',
+        formData: formData
+    }).then((data) => {
+        const body = JSON.parse(data.body);
 
-            console.log(body);
+        const restaurantImage = new RestaurantImage({
+            id: body.id,
+            url: body.url,
+            contentType: body.mimetype
         });
 
-        // res.send(formData)
+        return Restaurant.findByIdAndUpdate(
+            restaurantId,
+            {
+                $push: {
+                    'images': restaurantImage
+                }
+            },
+            {
+                new: true
+            }
+        );
+    }).then((model) => {
+        res.json(model);
+    }).catch((err) => {
+        return next(err);
     });
+});
 
-    busboy.on('finish', () => {
-        console.log('Done parsing form!');
-        res.sendStatus(200);
+router.delete('/image/:id', (req, res, next) => {
+    const restaurantId = req.params.id;
+    const imageId = req.body.id;
+
+    request.delAsync({
+        url: `http://localhost:8080/api/image/${imageId}`
+    }).then((output) => {
+        return Restaurant.findByIdAndUpdate(
+            restaurantId,
+            {
+                $pull: {
+                    'images': {
+                        id: imageId
+                    }
+                }
+            },
+            {
+                new: true
+            }
+        );
+    }).then((model) => {
+        res.json({
+            restaurantId: restaurantId,
+            imageId: imageId
+        });
+    }).catch((err) => {
+        return next(err);
     });
-
-    req.pipe(busboy);
 });
 
 module.exports = router;

@@ -11,6 +11,10 @@ const RestaurantImageSchema = mongoose.Schema({
         type: String,
         required: true
     },
+    contentType: {
+        type: String,
+        required: true
+    },
     date: {
         type: Date,
         default: Date.now
