@@ -16,5 +16,6 @@
     "multer": "^1.1.0",
     "node-uuid": "^1.4.7",
     "request": "^2.70.0"
-  }
+  },
+  "devDependencies": {}
 }
